@@ -28,6 +28,11 @@ jobs:
           fetch-depth: 0          # full history so the action can diff base..head
 
       - name: TruffleHog secret scan
-        uses: trufflesecurity/trufflehog@main
+        # Pinned by full commit SHA (not @main) so an upstream branch push can't
+        # silently change what runs in every enrolled repo. `version` pins the
+        # scanner image tag too (avoids the mutable :latest). Bump both together
+        # when upgrading; see README → "Upgrading the scanner".
+        uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51  # v3.95.5
         with:
+          version: "v3.95.5"
           extra_args: ${{ inputs.extra_args }}

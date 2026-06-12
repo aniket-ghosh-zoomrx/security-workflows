@@ -25,6 +25,57 @@ machine.
 
 That's it — every push to the default branch and every pull request now gets scanned.
 
+## Auto-enrollment for new repos
+
+Two mechanisms keep new repos covered without manual copying.
+
+### 1. `ghnew` — instant enrollment at creation time
+
+[`tools/ghnew.sh`](./tools/ghnew.sh) is a Git Bash function that creates a repo **and** adds the `@v1`
+caller in one step:
+
+```bash
+source "$HOME/security-workflows/tools/ghnew.sh"   # add this line to ~/.bashrc
+ghnew my-new-repo            # private repo + secret scanning (default)
+ghnew my-new-repo --public   # public
+ghnew my-new-repo --clone    # also clone locally (auto-pulls the caller)
+```
+
+Defaults to **private**; requires `gh` with the `workflow` token scope. Covers only repos you create
+through `ghnew` (not the web UI) — the sweep below is the catch-all.
+
+### 2. `auto-enroll.yml` — daily self-healing sweep
+
+[`.github/workflows/auto-enroll.yml`](./.github/workflows/auto-enroll.yml) runs daily (and on
+`workflow_dispatch`). It lists every owned, non-archived, non-fork repo and adds the `@v1` caller to any
+that lack it — catching repos created via the web UI, import, or anything `ghnew` misses. It is
+**idempotent** (skips already-enrolled repos), **non-clobbering** (a create-only PUT never overwrites an
+existing `trufflehog.yml`), and **fails loud** (aborts rather than reporting a green no-op if the repo
+listing errors).
+
+**Activation — create the `ENROLL_TOKEN` secret (one-time):**
+
+1. GitHub → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. **Resource owner:** `aniket-ghosh-zoomrx`. **Repository access:** *All repositories*.
+3. **Permissions → Repository permissions:** **Contents:** Read and write · **Workflows:** Read and write · **Metadata:** Read-only (auto-selected).
+4. **Expiration:** keep it short (e.g. 90 days) — this is a high-privilege token; rotate on a calendar.
+5. Generate and copy the token.
+6. This repo → **Settings → Secrets and variables → Actions → New repository secret** → name **`ENROLL_TOKEN`**, value = the token.
+7. Test: **Actions → "Auto-enroll secret scanning" → Run workflow**, then read the run summary.
+
+**Operational caveats:**
+
+- **`ENROLL_TOKEN` is a top-tier credential** — Contents + Workflows write across *all* your repos. Guard
+  who can read this repo's secrets; prefer a short expiry + rotation, or a GitHub App installation token
+  minted per-run instead of a static PAT.
+- **The 60-day rule:** GitHub disables a scheduled workflow after 60 days with no repo activity. To
+  guarantee the sweep keeps firing, also POST a `workflow_dispatch` from an external scheduler — this
+  project already uses **cron-job.org** for the dashboard, so add a second job hitting
+  `POST /repos/aniket-ghosh-zoomrx/security-workflows/actions/workflows/auto-enroll.yml/dispatches` with
+  body `{"ref":"main"}` (`workflow_dispatch` is exempt from the 60-day rule).
+- **Default-branch renames:** the generated caller pins `on: push: branches: [<default>]`. If a repo's
+  default branch is renamed later, re-run enrollment; the `pull_request:` trigger is unaffected either way.
+
 ## One-time central setup (already done)
 
 Because this repo is **private**, other private repos owned by the same account must be granted access to
@@ -64,6 +115,20 @@ git push -f origin v1    # callers on @v1 pick it up on their next run
 (For stricter pinning you can reference a full commit SHA instead of `v1`. Bumping a major version —
 e.g. `v2` for a breaking change — lets callers migrate on their own schedule.)
 
+**Protect the `v1` tag** so it can't be force-moved by accident or a leaked token: this repo →
+**Settings → Rules → Rulesets → New tag ruleset** → target `v1` → restrict updates and deletions.
+
+## Upgrading the scanner
+
+The reusable workflow pins the TruffleHog action to a **full commit SHA** (not `@main`) and the scanner
+image to a fixed **`version`** tag — so an upstream branch push can't silently change what runs in every
+enrolled repo. To upgrade deliberately:
+
+1. Pick the new release: `gh release view --repo trufflesecurity/trufflehog`.
+2. Resolve its commit SHA: `gh api repos/trufflesecurity/trufflehog/commits/<tag> -q .sha`.
+3. In `trufflehog-reusable.yml` update both lines: `uses: trufflesecurity/trufflehog@<sha>  # <tag>` and `version: "<tag>"`.
+4. Commit, then move the `v1` tag (see Versioning) so callers pick it up on their next run.
+
 ## ⚠️ Why there is no local pre-commit hook
 
 A local TruffleHog CLI pre-commit hook was intended as a second layer (catch secrets *before* they're
@@ -87,6 +152,7 @@ delegate to each repo's own `.git/hooks/*` (so existing hooks like auto-push are
 | Layer | Status | Where it runs |
 |---|---|---|
 | CI reusable workflow + per-repo caller | ✅ Active | GitHub-hosted runner |
+| Auto-enrollment: `ghnew` (instant) + daily sweep (catch-all) | ✅ Active (sweep needs `ENROLL_TOKEN`) | Dev machine + GitHub-hosted runner |
 | Global `~/.claude/CLAUDE.md` directive (Claude never commits secrets) | ✅ Active | Claude Code sessions |
 | Local pre-commit CLI hook | ⛔ Blocked by WDAC — needs IT allowlist | Developer machine |
 | GitHub Push Protection (server-side push blocking) | ⏸ Deferred (private repos need GHAS) | GitHub server |

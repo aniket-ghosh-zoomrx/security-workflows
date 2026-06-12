@@ -1,0 +1,153 @@
+name: Auto-enroll secret scanning
+
+# Daily self-healing sweep: adds the TruffleHog secret-scan caller (pinned @v1)
+# to every owned, non-archived, non-fork, non-empty repo that doesn't already
+# have it. Covers repos created via the web UI / import — anything the local
+# `ghnew` wrapper doesn't catch at creation time. Idempotent + non-clobbering:
+# repos that already have the caller are skipped; a pre-existing different
+# trufflehog.yml is never overwritten (create-only PUT, no blob sha supplied).
+#
+# REQUIRES a repo secret `ENROLL_TOKEN`: a fine-grained PAT owned by
+# aniket-ghosh-zoomrx, scoped to "All repositories", with:
+#   - Contents:  Read and write   (create the workflow file)
+#   - Workflows: Read and write   (required to write under .github/workflows/)
+#   - Metadata:  Read-only        (mandatory baseline, auto-selected)
+# A workflow's built-in GITHUB_TOKEN cannot write to OTHER repos, so a PAT is
+# required. Treat ENROLL_TOKEN as a top-tier credential (Contents+Workflows
+# write across ALL repos): set a short expiry and rotate. See README.
+#
+# NOTE: GitHub disables a scheduled workflow after 60 days of repo inactivity.
+# To guarantee the sweep keeps firing, also trigger it via workflow_dispatch
+# from an external scheduler (this project already uses cron-job.org). See README.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'        # 03:00 UTC daily (~08:30 IST)
+  workflow_dispatch:
+
+permissions: {}               # GITHUB_TOKEN unused; all writes go through ENROLL_TOKEN
+
+concurrency:
+  group: auto-enroll
+  cancel-in-progress: false
+
+jobs:
+  enroll:
+    runs-on: ubuntu-latest
+    env:
+      OWNER: aniket-ghosh-zoomrx
+      REUSABLE_REF: v1
+      LIMIT: '1000'
+      GH_TOKEN: ${{ secrets.ENROLL_TOKEN }}
+    steps:
+      - name: Enroll unprotected repos
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::ENROLL_TOKEN secret is not set. Create a fine-grained PAT (Contents+Workflows write, all repos) and add it as repo secret ENROLL_TOKEN. See README -> Auto-enrollment."
+            exit 1
+          fi
+
+          CALLER_PATH=".github/workflows/trufflehog.yml"
+
+          # Retry wrapper for transient gh failures (5xx / secondary rate-limit / network).
+          gh_retry() {
+            local n=0 max=4 delay=5
+            until gh "$@"; do
+              n=$((n + 1)); [ "$n" -ge "$max" ] && return 1
+              sleep "$delay"; delay=$((delay * 2))
+            done
+          }
+
+          # Returns (via stdout) one of: present | absent | error:<msg>. Retries non-404 errors.
+          check_caller() {
+            local repo="$1" br="$2" out n=0
+            while :; do
+              if out=$(gh api --silent "repos/$OWNER/$repo/contents/$CALLER_PATH?ref=$br" 2>&1); then
+                echo present; return 0
+              fi
+              if printf '%s' "$out" | grep -qiE 'HTTP 404|Not Found'; then
+                echo absent; return 0
+              fi
+              n=$((n + 1)); [ "$n" -ge 3 ] && { echo "error:$(printf '%s' "$out" | tail -1)"; return 0; }
+              sleep 3
+            done
+          }
+
+          # 1) List repos. FAIL LOUD on a listing error — never mistake an API failure for "nothing to do".
+          #    Uses gh's built-in jq (-q) so no external jq dependency; exit status still captured.
+          if ! repos_out=$(gh_retry repo list "$OWNER" --no-archived --source --limit "$LIMIT" \
+               --json name,defaultBranchRef,isEmpty \
+               -q '.[] | select(.isEmpty == false) | "\(.name)\t\(.defaultBranchRef.name // "")"'); then
+            echo "::error::gh repo list failed (token expiry / rate-limit / network). Aborting so a transient failure is not reported as success."
+            exit 1
+          fi
+          lines=()
+          [ -n "$repos_out" ] && mapfile -t lines <<< "$repos_out"
+
+          { echo "## Auto-enroll secret scanning"; echo ""; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${#lines[@]}" -eq 0 ]; then
+            echo "::warning::0 eligible repos returned — unexpected for this owner; verify token scope/listing."
+          fi
+          if [ "${#lines[@]}" -ge "$LIMIT" ]; then
+            echo "::warning::repo list hit the --limit cap ($LIMIT); some repos may be unenrolled. Raise LIMIT or paginate."
+          fi
+
+          enrolled=0; skipped=0; failed=0
+          for line in "${lines[@]}"; do
+            [ -z "$line" ] && continue
+            name="${line%%$'\t'*}"
+            branch="${line#*$'\t'}"
+            if [ -z "$name" ] || [ -z "$branch" ]; then
+              echo "- \`$name\` — ⚠ FAILED: no default branch resolved" >> "$GITHUB_STEP_SUMMARY"
+              failed=$((failed + 1)); continue
+            fi
+
+            res=$(check_caller "$name" "$branch")
+            case "$res" in
+              present) skipped=$((skipped + 1)); continue ;;
+              absent)  : ;;
+              error:*) echo "- \`$name\` — ⚠ FAILED: existence check ${res#error:}" >> "$GITHUB_STEP_SUMMARY"
+                       failed=$((failed + 1)); continue ;;
+            esac
+
+            # Branch quoted as a YAML string to neutralise ']' ',' '#' etc. in exotic branch names.
+            caller=$(printf '%s\n' \
+              "name: Secret Scan" \
+              "" \
+              "on:" \
+              "  push:" \
+              "    branches:" \
+              "      - \"$branch\"" \
+              "  pull_request:" \
+              "" \
+              "permissions:" \
+              "  contents: read" \
+              "" \
+              "jobs:" \
+              "  trufflehog:" \
+              "    uses: $OWNER/security-workflows/.github/workflows/trufflehog-reusable.yml@$REUSABLE_REF")
+            b64=$(printf '%s\n' "$caller" | base64 | tr -d '\n')
+
+            if put_out=$(gh_retry api --method PUT "repos/$OWNER/$name/contents/$CALLER_PATH" \
+                 -f message="chore(ci): auto-enroll TruffleHog secret scan (@$REUSABLE_REF)" \
+                 -f content="$b64" -f branch="$branch" 2>&1); then
+              echo "- \`$name\` — ✅ enrolled (branch \`$branch\`)" >> "$GITHUB_STEP_SUMMARY"
+              enrolled=$((enrolled + 1))
+            elif printf '%s' "$put_out" | grep -qiE '422|already exists|sha.{0,6}supplied'; then
+              # Race: file appeared between check and create-PUT. Non-clobbering; treat as enrolled.
+              skipped=$((skipped + 1))
+            else
+              echo "- \`$name\` — ❌ enroll FAILED: $(printf '%s' "$put_out" | tail -1)" >> "$GITHUB_STEP_SUMMARY"
+              failed=$((failed + 1))
+            fi
+          done
+
+          {
+            echo ""
+            echo "**Enrolled: $enrolled · Skipped (already enrolled): $skipped · Failed: $failed**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Enrolled=$enrolled Skipped=$skipped Failed=$failed"
+          [ "$failed" -eq 0 ]
