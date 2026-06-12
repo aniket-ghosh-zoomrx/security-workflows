@@ -156,4 +156,4 @@ delegate to each repo's own `.git/hooks/*` (so existing hooks like auto-push are
 | Auto-enrollment: `ghnew` (instant) + daily sweep (catch-all) | ✅ Active (sweep needs `ENROLL_TOKEN`) | Dev machine + GitHub-hosted runner |
 | Global `~/.claude/CLAUDE.md` directive (Claude never commits secrets) | ✅ Active | Claude Code sessions |
 | Local pre-commit CLI hook | ⛔ Blocked by WDAC — needs IT allowlist | Developer machine |
-| GitHub Push Protection (server-side push blocking) | ⏸ Deferred (private repos need GHAS) | GitHub server |
+| GitHub Push Protection (native, pre-push block) | ✅ Active on this (public) repo; 🔒 private code repos need GHAS | GitHub server |
