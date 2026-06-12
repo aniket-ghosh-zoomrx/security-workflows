@@ -125,10 +125,20 @@ The reusable workflow pins the TruffleHog action to a **full commit SHA** (not `
 image to a fixed **`version`** tag — so an upstream branch push can't silently change what runs in every
 enrolled repo. To upgrade deliberately:
 
-1. Pick the new release: `gh release view --repo trufflesecurity/trufflehog`.
+1. Pick the new release: `gh release view --repo trufflesecurity/trufflehog` → e.g. tag `v3.95.5`.
 2. Resolve its commit SHA: `gh api repos/trufflesecurity/trufflehog/commits/<tag> -q .sha`.
-3. In `trufflehog-reusable.yml` update both lines: `uses: trufflesecurity/trufflehog@<sha>  # <tag>` and `version: "<tag>"`.
-4. Commit, then move the `v1` tag (see Versioning) so callers pick it up on their next run.
+3. In `trufflehog-reusable.yml` update both lines:
+   - `uses: trufflesecurity/trufflehog@<sha>  # <release-tag>` — the action ref uses the **release tag with the `v`** (or the SHA).
+   - `version: "<image-tag>"` — the **container image tag has NO leading `v`** (release `v3.95.5` → image `3.95.5`). Mismatching these is what caused a `manifest unknown` / docker exit 125 outage; the `v`-prefixed image tag does not exist.
+4. **Verify the image tag exists before shipping** (don't assume the format):
+   ```bash
+   T=$(curl -s "https://ghcr.io/token?scope=repository:trufflesecurity/trufflehog:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+   curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $T" \
+     https://ghcr.io/v2/trufflesecurity/trufflehog/manifests/<image-tag>   # expect 200
+   ```
+5. Commit, then move the `v1` tag (see Versioning) so callers pick it up. **Then actually trigger a run and
+   confirm it's green** — a tag move is only validated by a fresh run on the moved tag, not by a run that
+   fired before the move.
 
 ## ⚠️ Why there is no local pre-commit hook
 
