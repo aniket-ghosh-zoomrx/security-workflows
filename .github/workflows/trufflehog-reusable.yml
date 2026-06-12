@@ -34,5 +34,5 @@ jobs:
         # when upgrading; see README → "Upgrading the scanner".
         uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51  # v3.95.5
         with:
-          version: "v3.95.5"
+          version: "3.95.5"   # ghcr image tag has NO leading "v" (the action release tag is v3.95.5)
           extra_args: ${{ inputs.extra_args }}
