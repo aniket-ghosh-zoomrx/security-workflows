@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-repo caller for the central TruffleHog reusable workflow.
+#
+# To adopt secret scanning in a repo:
+#   1. Copy this file to  .github/workflows/trufflehog.yml  in the target repo.
+#   2. Adjust the `branches:` list to that repo's default branch if it isn't `main`.
+#   3. Commit & push. (Pushing a workflow file needs a token with `workflow` scope.)
+#
+# Requires: security-workflows → Settings → Actions → General → Access set to
+# "Accessible from repositories owned by the user account" (done once, centrally).
+# ─────────────────────────────────────────────────────────────────────────────
+name: Secret Scan
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  trufflehog:
+    uses: aniket-ghosh-zoomrx/security-workflows/.github/workflows/trufflehog-reusable.yml@main
+    # Override scan flags if needed, e.g. broader coverage:
+    # with:
+    #   extra_args: "--results=verified,unknown --fail"

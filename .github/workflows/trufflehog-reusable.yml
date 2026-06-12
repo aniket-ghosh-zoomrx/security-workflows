@@ -1,0 +1,33 @@
+name: TruffleHog Secret Scan (reusable)
+
+# Reusable secret-scanning workflow. Call it from any repo with a tiny caller
+# workflow (see ../../caller-template.yml). Runs entirely on a GitHub-hosted
+# Ubuntu runner — no local tooling required (important: developer machines here
+# are WDAC-enforced and cannot run the TruffleHog CLI locally).
+
+on:
+  workflow_call:
+    inputs:
+      extra_args:
+        description: "Args passed to the TruffleHog action. Default = verified-only, fail the build on a finding."
+        required: false
+        type: string
+        default: "--results=verified --fail"
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: TruffleHog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so the action can diff base..head
+
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: ${{ inputs.extra_args }}
