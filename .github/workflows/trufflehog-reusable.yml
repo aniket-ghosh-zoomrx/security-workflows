@@ -9,10 +9,10 @@ on:
   workflow_call:
     inputs:
       extra_args:
-        description: "Args passed to the TruffleHog action. Default = verified-only, fail the build on a finding."
+        description: "Args passed to the TruffleHog action. Default = verified-only. (Do NOT add --fail here — the action injects it; passing it twice errors with 'flag fail cannot be repeated'. The build still fails on a verified finding.)"
         required: false
         type: string
-        default: "--results=verified --fail"
+        default: "--results=verified"
 
 permissions:
   contents: read

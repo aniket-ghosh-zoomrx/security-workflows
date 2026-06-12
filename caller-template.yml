@@ -22,6 +22,9 @@ permissions:
 jobs:
   trufflehog:
     uses: aniket-ghosh-zoomrx/security-workflows/.github/workflows/trufflehog-reusable.yml@main
-    # Override scan flags if needed, e.g. broader coverage:
+    # Override scan flags if needed, e.g. broader coverage.
+    # NOTE: never pass --fail here — the TruffleHog action adds it automatically
+    # (passing it twice errors: "flag 'fail' cannot be repeated"). The job still
+    # fails on a verified finding.
     # with:
-    #   extra_args: "--results=verified,unknown --fail"
+    #   extra_args: "--results=verified,unknown"

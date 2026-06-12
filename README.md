@@ -40,9 +40,10 @@ call its reusable workflow:
 |---|---|
 | `--results=verified` | Only report credentials confirmed **live** by an API call (our default). |
 | `--results=verified,unknown` | Also report plausible-but-unverifiable matches (broader, noisier). |
-| `--fail` | Exit non-zero (code 183) if any result is found → fails the CI job. |
+| `--fail` | Exit non-zero (code 183) on a finding → fails the CI job. **The action adds this automatically — do NOT put it in `extra_args`** (passing it twice errors: `flag 'fail' cannot be repeated`). |
 
 Override per-repo via the caller's `with: extra_args:` (see the template's commented example).
+Only override the `--results=...` scope; never re-add `--fail`.
 
 ## ⚠️ Why there is no local pre-commit hook
 
