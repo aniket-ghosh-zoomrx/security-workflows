@@ -45,6 +45,25 @@ call its reusable workflow:
 Override per-repo via the caller's `with: extra_args:` (see the template's commented example).
 Only override the `--results=...` scope; never re-add `--fail`.
 
+## Versioning (why callers pin `@v1`)
+
+Callers reference the reusable workflow at a **tag** (`...trufflehog-reusable.yml@v1`), not `@main`.
+This is deliberate supply-chain hygiene for a security workflow: a caller pinned to `@main` runs whatever
+is on `main` at trigger time, so an unintended (or malicious) edit to `main` would silently change the CI
+of **every** repo that calls it. Pinning to `@v1` means callers only move when the tag is deliberately
+re-pointed.
+
+**To ship a change to the reusable workflow:**
+
+```bash
+# after committing the change to main:
+git tag -f v1            # move the v1 tag to the new commit
+git push -f origin v1    # callers on @v1 pick it up on their next run
+```
+
+(For stricter pinning you can reference a full commit SHA instead of `v1`. Bumping a major version —
+e.g. `v2` for a breaking change — lets callers migrate on their own schedule.)
+
 ## ⚠️ Why there is no local pre-commit hook
 
 A local TruffleHog CLI pre-commit hook was intended as a second layer (catch secrets *before* they're
