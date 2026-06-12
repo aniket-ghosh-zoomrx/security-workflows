@@ -1,0 +1,13 @@
+name: Secret Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  trufflehog:
+    uses: aniket-ghosh-zoomrx/security-workflows/.github/workflows/trufflehog-reusable.yml@v1
