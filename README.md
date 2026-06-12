@@ -72,7 +72,8 @@ listing errors).
   guarantee the sweep keeps firing, also POST a `workflow_dispatch` from an external scheduler — this
   project already uses **cron-job.org** for the dashboard, so add a second job hitting
   `POST /repos/aniket-ghosh-zoomrx/security-workflows/actions/workflows/auto-enroll.yml/dispatches` with
-  body `{"ref":"main"}` (`workflow_dispatch` is exempt from the 60-day rule).
+  body `{"ref":"main"}` (`workflow_dispatch` is exempt from the 60-day rule). Full config in
+  [CRON-SETUP.md](./CRON-SETUP.md).
 - **Default-branch renames:** the generated caller pins `on: push: branches: [<default>]`. If a repo's
   default branch is renamed later, re-run enrollment; the `pull_request:` trigger is unaffected either way.
 
